@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF.js Standalone Example</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- PDF.js library from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script>
+    // Set the workerSrc for PDF.js
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  </script>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    #pdf-canvas { border: 1px solid #ccc; margin-top: 1em; }
+    #controls { margin-top: 1em; }
+    #fields-container {
+      margin-top: 1em;
+    }
+    .draggable-field {
+      display: inline-block;
+      padding: 0.5em 1em;
+      margin-right: 1em;
+      background: #e0e0e0;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      cursor: grab;
+      user-select: none;
+    }
+    #overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+    .placed-field {
+      position: absolute;
+      background: rgba(255,255,200,0.8);
+      border: 1px dashed #888;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 1em;
+      pointer-events: auto;
+      cursor: move;
+    }
+    #pdf-container {
+      position: relative;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <h2>PDF.js Standalone Example</h2>
+  <input type="file" id="file-input" accept="application/pdf" />
+  <div id="controls" style="display:none;">
+    <button id="prev-page">Previous</button>
+    <span>Page: <span id="page-num"></span> / <span id="page-count"></span></span>
+    <button id="next-page">Next</button>
+  </div>
+  <div id="fields-container">
+    <div class="draggable-field" draggable="true" data-type="name">Name</div>
+    <div class="draggable-field" draggable="true" data-type="signature">Signature</div>
+  </div>
+  <div id="pdf-container">
+    <canvas id="pdf-canvas"></canvas>
+    <div id="overlay"></div>
+  </div>
+  <button id="download-pdf">Download PDF with Fields</button>
+
+  <script>
+    let pdfDoc = null;
+    let currentPage = 1;
+    let totalPages = 0;
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    const overlay = document.getElementById('overlay');
+    const pdfContainer = document.getElementById('pdf-container');
+    let placedFields = [];
+
+    // Preload PDF on page load
+    window.addEventListener('DOMContentLoaded', function() {
+      // Load the PDF from the given URL
+      fetch('./Saud-Resume.pdf')
+        .then(response => response.arrayBuffer())
+        .then(buffer => {
+          loadPdf(new Uint8Array(buffer));
+        })
+        .catch(err => {
+          console.error('Failed to preload PDF:', err);
+        });
+    });
+
+    document.getElementById('file-input').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file && file.type === 'application/pdf') {
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+          const typedarray = new Uint8Array(ev.target.result);
+          loadPdf(typedarray);
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        alert('Please select a valid PDF file.');
+      }
+    });
+
+    function loadPdf(data) {
+      pdfjsLib.getDocument({ data }).promise.then(function(pdf) {
+        pdfDoc = pdf;
+        totalPages = pdf.numPages;
+        currentPage = 1;
+        document.getElementById('controls').style.display = '';
+        renderPage(currentPage);
+      });
+    }
+
+    function renderPage(num) {
+      pdfDoc.getPage(num).then(function(page) {
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        updateOverlaySize();
+
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: viewport
+        };
+        page.render(renderContext);
+        document.getElementById('page-num').textContent = num;
+        document.getElementById('page-count').textContent = totalPages;
+        renderFields();
+      });
+    }
+
+    document.getElementById('prev-page').addEventListener('click', function() {
+      if (currentPage <= 1) return;
+      currentPage--;
+      renderPage(currentPage);
+    });
+
+    document.getElementById('next-page').addEventListener('click', function() {
+      if (currentPage >= totalPages) return;
+      currentPage++;
+      renderPage(currentPage);
+    });
+
+    // Make overlay match canvas size and position
+    function updateOverlaySize() {
+      overlay.style.width = canvas.width + 'px';
+      overlay.style.height = canvas.height + 'px';
+      overlay.style.left = canvas.offsetLeft + 'px';
+      overlay.style.top = canvas.offsetTop + 'px';
+    }
+
+    // Render placed fields
+    function renderFields() {
+      overlay.innerHTML = '';
+      placedFields.forEach((field, idx) => {
+        if (field.page !== currentPage) return;
+        const div = document.createElement('div');
+        div.className = 'placed-field';
+        div.style.left = field.x + 'px';
+        div.style.top = field.y + 'px';
+
+        // Add label
+        const label = document.createElement('span');
+        label.textContent = field.type === 'name' ? 'Name: ' : 'Signature: ';
+        label.style.fontWeight = 'bold';
+        label.style.marginRight = '4px';
+
+        // Make the field editable
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = field.value || '';
+        input.placeholder = field.type === 'name' ? 'Enter name' : 'Enter signature';
+        input.style.background = 'transparent';
+        input.style.border = 'none';
+        input.style.width = '100px';
+        input.style.fontSize = '1em';
+
+        // Save changes to placedFields array
+        input.addEventListener('input', function() {
+          field.value = input.value;
+        });
+
+        div.appendChild(label);
+        div.appendChild(input);
+        overlay.appendChild(div);
+      });
+    }
+
+    // Drag and drop logic
+    document.querySelectorAll('.draggable-field').forEach(el => {
+      el.addEventListener('dragstart', function(e) {
+        e.dataTransfer.setData('text/plain', el.dataset.type);
+      });
+    });
+
+    overlay.addEventListener('dragover', function(e) {
+      e.preventDefault();
+    });
+
+    overlay.addEventListener('drop', function(e) {
+      e.preventDefault();
+      const type = e.dataTransfer.getData('text/plain');
+      const rect = overlay.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      placedFields.push({ type, x, y, page: currentPage });
+      renderFields();
+    });
+
+    // Update overlay size on window resize
+    window.addEventListener('resize', updateOverlaySize);
+
+    // Update overlay size after PDF is loaded
+    function loadPdf(data) {
+      pdfjsLib.getDocument({ data }).promise.then(function(pdf) {
+        pdfDoc = pdf;
+        totalPages = pdf.numPages;
+        currentPage = 1;
+        document.getElementById('controls').style.display = '';
+        renderPage(currentPage);
+      });
+    }
+
+    document.getElementById('download-pdf').addEventListener('click', async function() {
+      // Fetch the original PDF again
+      const existingPdfBytes = await fetch('./Saud-Resume.pdf').then(res => res.arrayBuffer());
+      const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+
+      // For each field, draw on the correct page
+      for (const field of placedFields) {
+        const page = pdfDoc.getPage(field.page - 1); // pdf-lib pages are 0-indexed
+
+        // Calculate position scaling (since PDF.js and pdf-lib may use different scales)
+        // Here, we assume scale=1.5 in PDF.js, so divide by 1.5 to get PDF points
+        const scale = 1.5;
+        const x = field.x / scale;
+        // PDF.js and pdf-lib have different y origins: PDF.js (top-left), pdf-lib (bottom-left)
+        // So we need to convert y
+        const canvasHeight = document.getElementById('pdf-canvas').height;
+        const y = (canvasHeight - field.y) / scale;
+
+        // Draw label
+        page.drawText(field.type === 'name' ? 'Name:' : 'Signature:', {
+          x: x,
+          y: y,
+          size: 12,
+          color: PDFLib.rgb(0, 0, 0),
+        });
+
+        // Draw value or empty box
+        if (field.value && field.value.trim() !== '') {
+          page.drawText(field.value, {
+            x: x + 60, // offset to the right of the label
+            y: y,
+            size: 12,
+            color: PDFLib.rgb(0, 0, 0),
+          });
+        } else {
+          // Draw an empty box to simulate an input
+          page.drawRectangle({
+            x: x + 60,
+            y: y - 2,
+            width: 100,
+            height: 16,
+            borderColor: PDFLib.rgb(0.5, 0.5, 0.5),
+            borderWidth: 1,
+            color: PDFLib.rgb(1, 1, 0.8),
+            opacity: 0.8,
+          });
+        }
+      }
+
+      // Save and download
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'filled.pdf';
+      link.click();
+    });
+  </script>
+</body>
+</html>

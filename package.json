@@ -1,0 +1,11 @@
+{
+  "name": "e-document-sign",
+  "version": "1.0.0",
+  "description": "e-document-sign is a secure and user-friendly web app for uploading, signing, and managing documents online. Features include drag-and-drop signatures, multi-signer support, ideal for individuals and teams.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
